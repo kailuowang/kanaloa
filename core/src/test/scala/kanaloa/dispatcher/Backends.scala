@@ -8,13 +8,13 @@ import scala.concurrent.duration.FiniteDuration
 import scala.concurrent.{ExecutionContext, Future, Promise}
 
 trait Backends {
-  def promiseBackend(promise: Promise[ActorRef])(implicit ex: ExecutionContext) = new Backend {
+  def promiseBackend(promise: Promise[ActorRef])(implicit ex: ExecutionContext) = new ActorBackend {
     def apply(f: ActorRefFactory): Future[ActorRef] = promise.future
   }
 
-  def processTimeBackend(processTime: FiniteDuration): Backend = Backends.delayedProcessorProps(processTime)
+  def processTimeBackend(processTime: FiniteDuration): ActorBackend = Backends.delayedProcessorProps(processTime)
 
-  def suicidal(delay: FiniteDuration): Backend = Props(classOf[SuicidalActor], delay)
+  def suicidal(delay: FiniteDuration): ActorBackend = Props(classOf[SuicidalActor], delay)
 }
 
 object Backends {

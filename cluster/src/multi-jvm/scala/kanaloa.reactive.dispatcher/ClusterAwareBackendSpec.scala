@@ -71,7 +71,7 @@ class ClusterAwareBackendSpec extends  MultiNodeSpec(ClusterAwareBackendSpec) wi
 
       runOn(first) {
         enterBarrier("deployed")
-        val backend = ClusterAwareBackend("echoService", serviceClusterRole)
+        val backend = ClusterAwareActorBackend("echoService", serviceClusterRole)
         val dispatcher = system.actorOf(PushingDispatcher.props(
           name = "test",
           backend,
@@ -112,7 +112,7 @@ class ClusterAwareBackendSpec extends  MultiNodeSpec(ClusterAwareBackendSpec) wi
 
       runOn(first) {
         enterBarrier("service2-deployed")
-        val backend = ClusterAwareBackend(servicePath, serviceClusterRole)
+        val backend = ClusterAwareActorBackend(servicePath, serviceClusterRole)
         val dispatcher = system.actorOf(PushingDispatcher.props(
           name = "test",
           backend,

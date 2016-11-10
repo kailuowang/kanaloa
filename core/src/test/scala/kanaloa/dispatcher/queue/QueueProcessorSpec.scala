@@ -19,12 +19,12 @@ import scala.concurrent.duration._
 
 class QueueProcessorSpec extends SpecWithActorSystem with Eventually with Backends {
 
-  type QueueTest = (TestActorRef[QueueProcessor], TestProbe, TestProbe, TestBackend, TestWorkerFactory) ⇒ Any
+  type QueueTest = (TestActorRef[QueueProcessor], TestProbe, TestProbe, TestActorBackend, TestWorkerFactory) ⇒ Any
 
   def withQueueProcessor(poolSettings: ProcessingWorkerPoolSettings = ProcessingWorkerPoolSettings(defaultShutdownTimeout = 500.milliseconds))(test: QueueTest) {
 
     val queueProbe = TestProbe("queue")
-    val testBackend = new TestBackend()
+    val testBackend = new TestActorBackend()
     val testWorkerFactory = new TestWorkerFactory()
     val metricsCollector = TestProbe("metrics-collector")
     val qp = TestActorRef[QueueProcessor](QueueProcessor.default(queueProbe.ref, testBackend, poolSettings, metricsCollector.ref, None, testWorkerFactory)(SimpleResultChecker))
@@ -153,7 +153,7 @@ class QueueProcessorSpec extends SpecWithActorSystem with Eventually with Backen
     "attempt to retry create Workers until it hits the minimumWorkers" in {
       val settings = ProcessingWorkerPoolSettings(minPoolSize = 2, startingPoolSize = 2, healthCheckInterval = 10.milliseconds)
 
-      val testBackend = new Backend {
+      val testBackend = new ActorBackend {
         var count = 0
         def apply(af: ActorRefFactory) = {
           if (count > 2) Future.successful(TestProbe().ref)
@@ -249,7 +249,7 @@ class QueueProcessorSpec extends SpecWithActorSystem with Eventually with Backen
     }
   }
 
-  class TestBackend extends Backend {
+  class TestActorBackend extends ActorBackend {
     val probe = TestProbe()
     var timesInvoked: Int = 0
 

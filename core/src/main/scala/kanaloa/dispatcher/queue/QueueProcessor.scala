@@ -6,20 +6,20 @@ import kanaloa.dispatcher.metrics.Metric
 import kanaloa.dispatcher.metrics.Metric.PoolSize
 import kanaloa.dispatcher.queue.Queue.Retire
 import kanaloa.dispatcher.queue.QueueProcessor._
-import kanaloa.dispatcher.{Backend, ResultChecker}
+import kanaloa.dispatcher.{ActorBackend$, ResultChecker}
 import kanaloa.util.MessageScheduler
 
 import scala.concurrent.duration._
 import scala.util.{Failure, Success}
 
 class QueueProcessor(
-  queue:                  QueueRef,
-  backend:                Backend,
-  settings:               ProcessingWorkerPoolSettings,
-  circuitBreakerSettings: Option[CircuitBreakerSettings],
-  metricsCollector:       ActorRef,
-  workerFactory:          WorkerFactory,
-  resultChecker:          ResultChecker
+                      queue:                  QueueRef,
+                      backend:                ActorBackend,
+                      settings:               ProcessingWorkerPoolSettings,
+                      circuitBreakerSettings: Option[CircuitBreakerSettings],
+                      metricsCollector:       ActorRef,
+                      workerFactory:          WorkerFactory,
+                      resultChecker:          ResultChecker
 ) extends Actor with ActorLogging with MessageScheduler {
 
   val healthCheckSchedule = {
@@ -222,12 +222,12 @@ object QueueProcessor {
   private[queue] case class RouteeFailed(ex: Throwable)
 
   def default(
-    queue:                  QueueRef,
-    backend:                Backend,
-    settings:               ProcessingWorkerPoolSettings,
-    metricsCollector:       ActorRef,
-    circuitBreakerSettings: Option[CircuitBreakerSettings] = None,
-    workerFactory:          WorkerFactory                  = DefaultWorkerFactory
+               queue:                  QueueRef,
+               backend:                ActorBackend,
+               settings:               ProcessingWorkerPoolSettings,
+               metricsCollector:       ActorRef,
+               circuitBreakerSettings: Option[CircuitBreakerSettings] = None,
+               workerFactory:          WorkerFactory                  = DefaultWorkerFactory
   )(resultChecker: ResultChecker): Props =
     Props(new QueueProcessor(
       queue,

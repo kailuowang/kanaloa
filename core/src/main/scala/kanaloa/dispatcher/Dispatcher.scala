@@ -4,7 +4,7 @@ import akka.actor.SupervisorStrategy.Escalate
 import akka.actor._
 import com.typesafe.config.{Config, ConfigFactory}
 import kanaloa.dispatcher.ApiProtocol.{ShutdownGracefully, WorkRejected}
-import kanaloa.dispatcher.Backend.BackendAdaptor
+import kanaloa.dispatcher.ActorBackend.BackendAdaptor
 import kanaloa.dispatcher.Dispatcher.{UnSubscribePerformanceMetrics, SubscribePerformanceMetrics, Settings}
 import kanaloa.dispatcher.Regulator.DroppingRate
 import kanaloa.dispatcher.metrics.{StatsDClient, Metric, MetricsCollector, Reporter}
@@ -21,7 +21,7 @@ import scala.util.Random
 trait Dispatcher extends Actor with ActorLogging {
   def name: String
   def settings: Dispatcher.Settings
-  def backend: Backend
+  def backend: ActorBackend
   def resultChecker: ResultChecker
   def reporter: Option[Reporter]
 
@@ -139,11 +139,11 @@ object Dispatcher {
 }
 
 case class PushingDispatcher(
-  name:          String,
-  settings:      Settings,
-  backend:       Backend,
-  reporter:      Option[Reporter],
-  resultChecker: ResultChecker
+                              name:          String,
+                              settings:      Settings,
+                              backend:       ActorBackend,
+                              reporter:      Option[Reporter],
+                              resultChecker: ResultChecker
 )
   extends Dispatcher {
   val random = new Random(23)
@@ -156,7 +156,7 @@ case class PushingDispatcher(
 
   /**
    * This extraReceive implementation helps this PushingDispatcher act as a transparent proxy.  It will send the message to the underlying [[Queue]] and the
-   * sender will be set as the receiver of any results of the downstream [[Backend]].  This receive will disable any acks, and in the event of an [[EnqueueRejected]],
+   * sender will be set as the receiver of any results of the downstream [[ActorBackend]].  This receive will disable any acks, and in the event of an [[EnqueueRejected]],
    * notify the original sender of the rejection.
    *
    * @return
@@ -192,13 +192,13 @@ object PushingDispatcher {
 }
 
 case class PullingDispatcher(
-  name:          String,
-  iterator:      Iterator[_],
-  settings:      Settings,
-  backend:       Backend,
-  reporter:      Option[Reporter],
-  sendResultsTo: Option[ActorRef],
-  resultChecker: ResultChecker
+                              name:          String,
+                              iterator:      Iterator[_],
+                              settings:      Settings,
+                              backend:       ActorBackend,
+                              reporter:      Option[Reporter],
+                              sendResultsTo: Option[ActorRef],
+                              resultChecker: ResultChecker
 ) extends Dispatcher {
   protected def queueProps = QueueOfIterator.props(
     iterator,

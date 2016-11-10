@@ -1,24 +1,24 @@
 package kanaloa.dispatcher
 
 import akka.actor._
-import kanaloa.dispatcher.Backend.BackendAdaptors.UnexpectedRequest
+import kanaloa.dispatcher.ActorBackend.BackendAdaptors.UnexpectedRequest
 
 import scala.concurrent.Future
 import scala.language.implicitConversions
 import scala.reflect._
 
-trait Backend {
+trait ActorBackend {
   def apply(f: ActorRefFactory): Future[ActorRef]
 }
 
-object Backend {
+object ActorBackend {
 
-  def apply(f: ActorRefFactory ⇒ ActorRef): Backend = new Backend {
+  def apply(f: ActorRefFactory ⇒ ActorRef): ActorBackend = new ActorBackend {
     def apply(factory: ActorRefFactory): Future[ActorRef] = Future.successful(f(factory))
   }
 
   trait BackendAdaptor[T] {
-    def apply(t: T): Backend
+    def apply(t: T): ActorBackend
   }
 
   object BackendAdaptor extends BackendAdaptors
@@ -26,20 +26,20 @@ object Backend {
   trait BackendAdaptors {
 
     // helper to create an adapator from a function
-    def apply[T](f: T ⇒ Backend): BackendAdaptor[T] = new BackendAdaptor[T] {
-      def apply(t: T): Backend = f(t)
+    def apply[T](f: T ⇒ ActorBackend): BackendAdaptor[T] = new BackendAdaptor[T] {
+      def apply(t: T): ActorBackend = f(t)
     }
 
-    implicit def backendBackendAdaptor[T <: Backend] = apply[T](identity)
+    implicit def backendBackendAdaptor[T <: ActorBackend] = apply[T](identity)
 
     // accepting subtypes of ActorRef to also support TestActorRef
-    implicit def actorRefBackend[T <: ActorRef]: BackendAdaptor[T] = apply[T](ref ⇒ Backend(_ ⇒ ref))
+    implicit def actorRefBackend[T <: ActorRef]: BackendAdaptor[T] = apply[T](ref ⇒ ActorBackend(_ ⇒ ref))
 
-    implicit val propsBackend = apply[Props](props ⇒ Backend(_.actorOf(props)))
+    implicit val propsBackend = apply[Props](props ⇒ ActorBackend(_.actorOf(props)))
 
     implicit def functionBackend[ReqT: ClassTag, ResT]: BackendAdaptor[ReqT ⇒ Future[ResT]] =
       apply[ReqT ⇒ Future[ResT]] { f ⇒
-        Backend(_.actorOf(Props(new SimpleFunctionDelegatee[ReqT, ResT](f)).withDeploy(Deploy.local)))
+        ActorBackend(_.actorOf(Props(new SimpleFunctionDelegatee[ReqT, ResT](f)).withDeploy(Deploy.local)))
       }
 
     private class SimpleFunctionDelegatee[ReqT: ClassTag, ResT](f: ReqT ⇒ Future[ResT]) extends Actor {
@@ -61,6 +61,6 @@ object Backend {
     case class UnexpectedRequest(request: Any) extends Exception
   }
 
-  implicit def backendAdaptorToBackend[T](t: T)(implicit adaptor: BackendAdaptor[T]): Backend = adaptor(t)
+  implicit def backendAdaptorToBackend[T](t: T)(implicit adaptor: BackendAdaptor[T]): ActorBackend = adaptor(t)
 
 }

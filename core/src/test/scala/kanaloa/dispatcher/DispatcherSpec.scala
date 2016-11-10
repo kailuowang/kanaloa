@@ -519,5 +519,5 @@ class ScopeWithActor(implicit system: ActorSystem) extends TestKit(system) with 
 
   val delegatee = TestProbe()
 
-  val backend: Backend = delegatee.ref
+  val backend: ActorBackend = delegatee.ref
 }
