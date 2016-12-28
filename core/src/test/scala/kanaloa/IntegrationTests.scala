@@ -9,7 +9,7 @@ import com.typesafe.config.ConfigFactory
 import kanaloa.ApiProtocol.{QueryStatus, ShutdownGracefully, ShutdownSuccessfully}
 import kanaloa.Dispatcher.SubscribePerformanceMetrics
 import kanaloa.IntegrationTests._
-import kanaloa.PerformanceSampler.{Report, Sample}
+import kanaloa.WorkerPoolSampler.{Report, WorkerPoolSample}
 import kanaloa.handler.{HandlerProvider, GeneralActorRefHandler}
 import kanaloa.handler.GeneralActorRefHandler.ResultChecker
 import kanaloa.metrics.StatsDClient
@@ -22,7 +22,7 @@ import scala.language.reflectiveCalls
 
 trait IntegrationSpec extends WordSpecLike with ShouldMatchers {
 
-  val verbose = false
+  val verbose = true
 
   private lazy val logLevel = if (verbose) "INFO" else "OFF"
 
@@ -203,9 +203,9 @@ class PullingDispatcherSanityCheckIntegration extends IntegrationSpec {
     val prob = TestProbe()
     pd ! SubscribePerformanceMetrics(prob.ref)
 
-    var samples = List[Sample]() //collect 20 samples
+    var samples = List[WorkerPoolSample]() //collect 20 samples
     val r = prob.fishForMessage(20.seconds) {
-      case s: Sample ⇒
+      case s: WorkerPoolSample ⇒
         samples = s :: samples
         samples.length > 20
       case p: Report ⇒
@@ -245,9 +245,7 @@ class AutothrottleWithPushingIntegration extends IntegrationSpec {
               min-pool-size = 1
             }
             back-pressure {
-              maxBufferSize = 60000
-              thresholdForExpectedWaitTime = 1h
-              maxHistoryLength = 3s
+              enabled = off
             }
             autothrottle {
               chance-of-scaling-down-when-full = 0.3
@@ -308,11 +306,7 @@ class AutothrottleWithPullingIntegration extends IntegrationSpec {
               starting-pool-size = 3
               min-pool-size = 1
             }
-            back-pressure {
-              maxBufferSize = 60000
-              thresholdForExpectedWaitTime = 1h
-              maxHistoryLength = 3s
-            }
+
             autothrottle {
               chance-of-scaling-down-when-full = 0.1
               resize-interval = 100ms

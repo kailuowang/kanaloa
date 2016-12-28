@@ -3,7 +3,8 @@ package kanaloa
 import java.time.{LocalDateTime ⇒ Time}
 
 import akka.actor.{Actor, ActorRef, Terminated}
-import kanaloa.PerformanceSampler._
+import kanaloa.WorkerPoolSampler._
+import kanaloa.Sampler.{Sample, AddSample}
 import kanaloa.Types.{QueueLength, Speed}
 import kanaloa.metrics.Metric._
 import kanaloa.metrics.{Metric, MetricsCollector}
@@ -14,55 +15,25 @@ import scala.concurrent.duration._
 
 /**
  *  Mixed-in with [[MetricsCollector]] to which all [[Metric]] are sent to.
- *  Behind the scene it also collects performance [[Sample]] from [[WorkCompleted]] and [[WorkFailed]]
+ *  Behind the scene it also collects performance [[WorkerPoolSample]] from [[WorkCompleted]] and [[WorkFailed]]
  *  when the system is in fullyUtilized state, namely when number
- *  of idle workers is less than [[PerformanceSamplerSettings]]
- *  It internally publishes these [[Sample]]s as well as [[PartialUtilization]] data
+ *  of idle workers is less than [[kanaloa.Sampler.SamplerSettings]]
+ *  It internally publishes these [[WorkerPoolSample]]s as well as [[PartialUtilization]] data
  *  which are only for internal tuning purpose, and should not be
  *  confused with the [[Metric]] used for realtime monitoring.
- *  It can be subscribed using [[Subscribe]] message.
- *  It publishes [[Sample]]s and [[PartialUtilization]] number to subscribers.
+ *  It can be subscribed using [[kanaloa.Sampler.Subscribe]] message.
+ *  It publishes [[WorkerPoolSample]]s and [[PartialUtilization]] number to subscribers.
  *
  */
-private[kanaloa] trait PerformanceSampler extends Actor {
-  self: MetricsCollector ⇒ //todo: it's using cake pattern to mixin with MetricsCollector mainly due to performance reason, there might be ways to achieve more decoupled ways without hurting performance
-
-  val settings: PerformanceSamplerSettings
-
-  private var subscribers: Set[ActorRef] = Set.empty
+private[kanaloa] trait WorkerPoolSampler extends Sampler {
+  mc: MetricsCollector ⇒ //todo: it's using cake pattern to mixin with MetricsCollector mainly due to performance reason, there might be ways to achieve more decoupled ways without hurting performance
 
   import settings._
 
-  private val scheduledSampling = {
-    import context.dispatcher
-    context.system.scheduler.schedule(
-      sampleInterval,
-      sampleInterval,
-      self,
-      AddSample
-    )
-  }
-
-  override def postStop(): Unit = {
-    scheduledSampling.cancel()
-    super.postStop()
-  }
-
   def receive = partialUtilized(0)
 
-  private def handleSubscriptions: Receive = {
-    case Subscribe(s) ⇒
-      subscribers += s
-      context watch s
-    case Unsubscribe(s) ⇒
-      subscribers -= s
-      context unwatch s
-    case Terminated(s) ⇒
-      subscribers -= s
-  }
-
   private def publishUtilization(idle: Int, poolSize: Int): Unit = {
-    val utilization = poolSize - idle
+    val utilization = poolSize - idle //todo: no longer valid, need to track separately
     publish(PartialUtilization(utilization))
     report(PoolUtilized(utilization))
   }
@@ -71,6 +42,8 @@ private[kanaloa] trait PerformanceSampler extends Actor {
     report(WorkQueueLength(queueLength.value))
 
   private def fullyUtilized(s: QueueStatus): Receive = handleSubscriptions orElse {
+    case Queue.DispatchReport(s, _) ⇒ //todo: temporary mid step in refactor
+      self ! s
     case Queue.Status(idle, workLeft, isFullyUtilized) ⇒
       reportQueueLength(workLeft)
       if (!isFullyUtilized) {
@@ -114,6 +87,8 @@ private[kanaloa] trait PerformanceSampler extends Actor {
   }
 
   private def partialUtilized(poolSize: Int): Receive = handleSubscriptions orElse {
+    case Queue.DispatchReport(s, _) ⇒ //todo: temporary mid step in refactor
+      self ! s
     case Queue.Status(idle, queueLength, isFullyUtilized) ⇒
       if (isFullyUtilized) {
         context become fullyUtilized(
@@ -133,7 +108,7 @@ private[kanaloa] trait PerformanceSampler extends Actor {
 
   /**
    *
-   * @param status
+   * @param so o l
    * @return a reset status if completes, the original status if not.
    */
   private def tryComplete(status: QueueStatus): (Option[Report], QueueStatus) = {
@@ -146,29 +121,9 @@ private[kanaloa] trait PerformanceSampler extends Actor {
     (sample, newStatus)
   }
 
-  private def publish(report: Report): Unit = {
-    subscribers.foreach(_ ! report)
-  }
-
 }
 
-private[kanaloa] object PerformanceSampler {
-  case object AddSample
-
-  case class Subscribe(actorRef: ActorRef)
-  case class Unsubscribe(actorRef: ActorRef)
-
-  /**
-   *
-   * @param sampleInterval do one sampling each interval
-   * @param minSampleDurationRatio minimum sample duration ratio to [[sampleInterval]]. Sample whose duration is less than this will be abandoned.
-   */
-  case class PerformanceSamplerSettings(
-    sampleInterval:         FiniteDuration = 1.second,
-    minSampleDurationRatio: Double         = 0.3
-  ) {
-    val minSampleDuration: Duration = sampleInterval * minSampleDurationRatio
-  }
+private[kanaloa] object WorkerPoolSampler {
 
   private case class QueueStatus(
     queueLength:    QueueLength,
@@ -178,8 +133,8 @@ private[kanaloa] object PerformanceSampler {
     avgProcessTime: Option[Duration] = None
   ) {
 
-    def toSample(minSampleDuration: Duration): Option[Sample] = {
-      if (duration >= minSampleDuration) Some(Sample(
+    def toSample(minSampleDuration: Duration): Option[WorkerPoolSample] = {
+      if (duration >= minSampleDuration) Some(WorkerPoolSample(
         workDone = workDone,
         start = start,
         end = Time.now,
@@ -195,9 +150,9 @@ private[kanaloa] object PerformanceSampler {
 
   }
 
-  sealed trait Report
+  sealed trait Report extends Sample
 
-  case class Sample(
+  case class WorkerPoolSample(
     workDone:       Int,
     start:          Time,
     end:            Time,
@@ -216,6 +171,7 @@ private[kanaloa] object PerformanceSampler {
    *
    * @param numOfBusyWorkers
    */
+  //todo: move this to queue sampler
   case class PartialUtilization(numOfBusyWorkers: Int) extends Report
 
 }

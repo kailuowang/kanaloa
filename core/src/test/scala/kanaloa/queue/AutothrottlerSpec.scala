@@ -4,7 +4,7 @@ import akka.actor.{ActorRef, ActorSystem, PoisonPill, Terminated}
 import akka.testkit._
 import kanaloa.ApiProtocol.QueryStatus
 import kanaloa.DurationFunctions._
-import kanaloa.PerformanceSampler.{PartialUtilization, Sample}
+import kanaloa.WorkerPoolSampler.{PartialUtilization, WorkerPoolSample}
 import kanaloa.Types.{Speed, QueueLength}
 import kanaloa.handler.ResultChecker
 import kanaloa.metrics.MetricsCollector
@@ -23,7 +23,7 @@ import org.mockito.Mockito._
 class AutothrottleSpec extends SpecWithActorSystem with OptionValues with Eventually with MockitoSugar {
 
   def sample(poolSize: PoolSize, avgProcessTime: Option[Duration] = None, workDone: Int = 3) =
-    Sample(workDone, 2.second.ago, 1.second.ago, poolSize, QueueLength(14), avgProcessTime)
+    WorkerPoolSample(workDone, 2.second.ago, 1.second.ago, poolSize, QueueLength(14), avgProcessTime)
 
   "Autothrottle" should {
     "when no history" in new AutothrottleScope {
@@ -281,7 +281,7 @@ class AutothrottleScope(implicit system: ActorSystem)
       case ((size, workDone), idx) ⇒
         val distance = ps.size - idx + 1
 
-        subject ! Sample(
+        subject ! WorkerPoolSample(
           workDone,
           start = distance.seconds.ago,
           end = (distance - 1).seconds.ago,

@@ -1,7 +1,8 @@
 package kanaloa
 
 import akka.actor._
-import kanaloa.PerformanceSampler.{Report, PartialUtilization, Sample}
+import kanaloa.QueueSampler.QueueSample
+import kanaloa.QueueSampler.{Report, PartialUtilization, QueueSample}
 import java.time.{LocalDateTime ⇒ Time}
 import kanaloa.Regulator.Status
 import kanaloa.metrics.Metric
@@ -36,21 +37,21 @@ import kanaloa.util.Java8TimeExtensions._
  *      else
  *         burstAllowed = burstAllowed - timePassed (roughly Tupdate)
  *
- * @param metricsCollector [[PerformanceSampler]] actor that provides Performance samples,
- *               this also controls the TupdateRate with frequency of samples
- * @param regulatee [[PushingDispatcher]] actor that receive the dropping probability update
+ * @param metricsCollector [[QueueSampler]] actor that provides Performance samples,
+ *                         this also controls the TupdateRate with frequency of samples
+ * @param regulatee        [[PushingDispatcher]] actor that receive the dropping probability update
  */
 class Regulator(settings: Settings, metricsCollector: ActorRef, regulatee: ActorRef) extends Actor with ActorLogging {
 
   override def preStart(): Unit = {
     super.preStart()
-    metricsCollector ! PerformanceSampler.Subscribe(self)
+    metricsCollector ! Sampler.Subscribe(self)
     metricsCollector ! Metric.DropRate(0)
 
   }
 
   def receive: Receive = {
-    case s: Sample ⇒
+    case s: QueueSample ⇒
       context become regulating(Status(
         delay = estimateDelay(s, s.speed),
         droppingRate = DroppingRate(0),
@@ -61,9 +62,9 @@ class Regulator(settings: Settings, metricsCollector: ActorRef, regulatee: Actor
   }
 
   private def regulating(status: Status): Receive = {
-    case s: Sample ⇒
+    case s: QueueSample ⇒
       continueWith(update(s, status, settings))
-    case PartialUtilization(_) ⇒
+    case PartialUtilization ⇒
       continueWith(
         status.copy(
           droppingRate = DroppingRate(0),
@@ -124,12 +125,12 @@ object Regulator {
   ): Option[FiniteDuration] =
     if (speed.value == 0) None else Some((queueLength.value.toDouble / speed.value).milliseconds)
 
-  private def estimateDelay(sample: Sample, avgSpeed: Speed): FiniteDuration =
+  private def estimateDelay(sample: QueueSample, avgSpeed: Speed): FiniteDuration =
     estimateDelay(sample.queueLength, avgSpeed).getOrElse(
       (sample.start.until(sample.end) * sample.queueLength.value.toDouble).asInstanceOf[FiniteDuration]
     )
 
-  private[kanaloa] def update(sample: Sample, lastStatus: Status, settings: Settings): Status = {
+  private[kanaloa] def update(sample: QueueSample, lastStatus: Status, settings: Settings): Status = {
     import settings._
     val avgSpeed =
       Speed(

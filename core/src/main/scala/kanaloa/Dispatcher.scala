@@ -25,7 +25,7 @@ trait Dispatcher[T] extends Actor with ActorLogging {
   def handlerProvider: HandlerProvider[T]
   def reporter: Option[Reporter]
 
-  protected lazy val metricsCollector = context.actorOf(MetricsCollector.props(reporter, settings.performanceSamplerSettings))
+  protected lazy val metricsCollector = context.actorOf(MetricsCollector.props(reporter, settings.samplerSettings))
 
   protected def queueProps: Props
 
@@ -58,8 +58,8 @@ trait Dispatcher[T] extends Actor with ActorLogging {
 
   def receive: Receive = ({
     case ShutdownGracefully(reportBack, timeout) ⇒ processor ! QueueProcessor.Shutdown(reportBack, timeout)
-    case SubscribePerformanceMetrics(actor)      ⇒ metricsCollector ! PerformanceSampler.Subscribe(actor)
-    case UnSubscribePerformanceMetrics(actor)    ⇒ metricsCollector ! PerformanceSampler.Unsubscribe(actor)
+    case SubscribePerformanceMetrics(actor)      ⇒ metricsCollector ! Sampler.Subscribe(actor)
+    case UnSubscribePerformanceMetrics(actor)    ⇒ metricsCollector ! Sampler.Unsubscribe(actor)
     case Terminated(`processor`) ⇒
       context stop self
       log.info(s"Dispatcher $name is shutdown")
@@ -83,7 +83,7 @@ object Dispatcher {
     circuitBreaker:            Option[CircuitBreakerSettings],
     autothrottle:              Option[AutothrottleSettings]
   ) {
-    val performanceSamplerSettings = PerformanceSampler.PerformanceSamplerSettings(updateInterval)
+    val samplerSettings = Sampler.SamplerSettings(updateInterval)
     lazy val workSettings = WorkSettings(workRetry, workTimeout, lengthOfDisplayForMessage)
   }
 
@@ -147,15 +147,26 @@ case class PushingDispatcher[T: ClassTag](
   extends Dispatcher[T] {
   val random = new Random(23)
   var droppingRate: DroppingRate = DroppingRate(0)
-  protected lazy val queueProps = Queue.default(metricsCollector, settings.workSettings)
+  lazy val queueSampler = context.actorOf(QueueSampler.props(reporter, settings.samplerSettings), "queueSampler")
+  lazy val temporaryProxy = {
+    import akka.actor.ActorDSL._
+    actor(new Act {
+      become {
+        case m ⇒
+          metricsCollector ! m
+          queueSampler ! m
+      }
+    })
+  }
+  protected lazy val queueProps = Queue.default(temporaryProxy, settings.workSettings)
 
   settings.regulator.foreach { rs ⇒
-    context.actorOf(Regulator.props(rs, metricsCollector, self), "regulator")
+    context.actorOf(Regulator.props(rs, queueSampler, self), "regulator")
   }
 
   /**
    * This extraReceive implementation helps this PushingDispatcher act as a transparent proxy.  It will send the message to the underlying [[Queue]] and the
-   * sender will be set as the receiver of any results of the downstream [[Backend]].  This receive will disable any acks, and in the event of an [[EnqueueRejected]],
+   * sender will be set as the receiver of any results of the downstream [[kanaloa.handler.Handler]].  This receive will disable any acks, and in the event of an [[EnqueueRejected]],
    * notify the original sender of the rejection.
    *
    * @return
@@ -163,7 +174,7 @@ case class PushingDispatcher[T: ClassTag](
   override def extraReceive: Receive = {
     case EnqueueRejected(enqueued, reason) ⇒ enqueued.sendResultsTo.foreach(_ ! WorkRejected(reason.toString))
     case r: DroppingRate                   ⇒ droppingRate = r
-    case m: T if classTag[T].runtimeClass.isInstance(m) ⇒
+    case m: T if classTag[T].runtimeClass.isInstance(m) ⇒ //todo: avoid this extra check when unnecessary (such as a method interface or the T is Any)
 
       metricsCollector ! Metric.WorkReceived
       dropOrEnqueue(m, sender)
